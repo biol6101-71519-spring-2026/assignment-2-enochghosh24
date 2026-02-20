@@ -1,0 +1,5 @@
+sample: 
+  - ecoli_k12
+
+reference: "/lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/reference/ecoli_K12.fa"
+fastq_directory: "/lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/fastq"

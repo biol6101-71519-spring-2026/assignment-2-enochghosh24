@@ -1,1 +1,98 @@
-c
+configfile: "config/config.yaml" #Load the configuration file (contains sample names, paths to FASTQ and reference)
+# Extract data from the config file
+SAMPLES = config["sample"] #List of sample
+FASTQ_DIR = config["fastq_directory"] #Directory containing FASTQs
+REFERENCE = config["reference"] #Path to ref genome
+
+
+rule all: #this gives list of files that should be present at the end of workflow
+    input:
+        expand("results/mapped/{sample}.sorted.bam", sample=SAMPLES), #final sorted BAM file
+        expand("results/mapped/{sample}.sorted.bam.bai", sample=SAMPLES), #BAm index
+        expand("results/stats/{sample}.flagstat.txt", sample=SAMPLES), #allignment stats
+        "results/qc/multiqc_report.html" #QC report
+
+# Quality Control
+
+rule fastqc: #to check sequencing quality
+    input:
+        r1 = f"{FASTQ_DIR}/{{sample}}_R1.fastq.gz", #forward read
+        r2 = f"{FASTQ_DIR}/{{sample}}_R2.fastq.gz" #reverse read
+    output:
+        r1_html = "results/qc/fastqc/{sample}_R1_fastqc.html",
+        r2_html = "results/qc/fastqc/{sample}_R2_fastqc.html"
+    log:
+        "logs/fastqc/{sample}.log" #log file to store errors and outputs
+    shell:
+        "mkdir -p results/qc/fastqc logs/fastqc && fastqc {input.r1} {input.r2} --outdir results/qc/fastqc &> {log}"
+
+
+
+rule multiqc: #combines all fastqc reports into a single html report
+    input:
+        expand("results/qc/fastqc/{sample}_R1_fastqc.html", sample=SAMPLES),
+        expand("results/qc/fastqc/{sample}_R2_fastqc.html", sample=SAMPLES)
+    output:
+        "results/qc/multiqc_report.html"
+    log:
+        "logs/multiqc.log"
+    shell:
+        "mkdir -p logs && multiqc results/qc/fastqc -o results/qc &> {log}"
+
+# Mapping
+
+rule index_reference: #this builds a Bowtie2 index from the ref genome. Must be done beofre alignment
+    input:
+        "/lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/reference/ecoli_K12.fa"
+    output:
+        "/lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/reference/ecoli_K12.1.bt2"
+    log:
+        "logs/index_reference.log"
+    shell:
+        "mkdir -p logs && bowtie2-build {input} /lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/reference/ecoli_K12 &> {log}"
+
+
+rule map_reads: #aligns reads to ref genome using Bowtie2 
+    input:
+        r1 = f"{FASTQ_DIR}/{{sample}}_R1.fastq.gz",
+        r2 = f"{FASTQ_DIR}/{{sample}}_R2.fastq.gz",
+        index_reference = "/lustre/scratch/eghosh/bioinfo_workflows/assignment-2-enochghosh24/data/reference/ecoli_K12.1.bt2"
+    output:
+        "results/mapped/{sample}.sam" #output for Bowtie2 is a sam file
+    log:
+        "logs/mapping/{sample}.log"
+    shell:
+        "mkdir -p results/mapped logs/mapping && bowtie2 -x data/reference/ecoli_K12 -1 {input.r1} -2 {input.r2} -S {output} &> {log}"
+
+
+rule sam_to_sorted_bam: #converts SAM file to BAM file
+    input:
+        "results/mapped/{sample}.sam"
+    output:
+        "results/mapped/{sample}.sorted.bam"
+    log:
+        "logs/samtools_sort/{sample}.log"
+    shell:
+        "mkdir -p logs/samtools_sort && samtools view -bS {input} | samtools sort -o {output} &> {log}"
+
+rule index_bam: #index tghe sorted Bam file
+    input:
+        "results/mapped/{sample}.sorted.bam"
+    output:
+        "results/mapped/{sample}.sorted.bam.bai"
+    log:
+        "logs/samtools_index/{sample}.log"
+    shell:
+        "mkdir -p logs/samtools_index && samtools index {input} &> {log}"
+
+#Final report
+
+rule flagstat: #this will generate stats from BAM file
+    input:
+        "results/mapped/{sample}.sorted.bam"
+    output:
+        "results/stats/{sample}.flagstat.txt" 
+    log:
+        "logs/flagstat/{sample}.log"
+    shell:
+        "mkdir -p results/stats logs/flagstat && samtools flagstat {input} > {output} 2> {log}"
